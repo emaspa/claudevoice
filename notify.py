@@ -182,7 +182,13 @@ def resolve_message(event: dict, config: dict) -> str | None:
         if not summary:
             text = template.replace("{summary}", "").strip()
         else:
-            text = template.replace("{summary}", summary)
+            # Avoid stuttering like "Done. Done. ..." when the summary
+            # already starts with the same prefix as the template.
+            prefix = template.split("{summary}")[0].strip().rstrip(".").lower()
+            if prefix and summary.lower().startswith(prefix):
+                text = summary
+            else:
+                text = template.replace("{summary}", summary)
         return _truncate(text)
 
     if hook_event == "Notification":
