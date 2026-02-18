@@ -7,13 +7,14 @@ Uses edge-tts (Microsoft neural voices) for TTS and Windows MCI for playback.
 import asyncio
 import json
 import os
+import re
 import sys
 import tempfile
 from ctypes import create_unicode_buffer, windll, wintypes
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
-MAX_MESSAGE_LENGTH = 200
+MAX_MESSAGE_LENGTH = 250
 
 # --- MCI audio playback (Windows) ---
 
@@ -82,8 +83,51 @@ def _truncate(text: str, max_len: int = MAX_MESSAGE_LENGTH) -> str:
     return cut.rstrip() + "."
 
 
+def _clean_line(line: str) -> str:
+    """Strip markdown and non-speakable content from a single line."""
+    # Remove inline code backticks but keep content
+    line = re.sub(r"`([^`]+)`", r"\1", line)
+    # Remove URLs
+    line = re.sub(r"https?://\S+", "", line)
+    # Remove markdown links, keep the label
+    line = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", line)
+    # Remove bold/italic markers
+    line = re.sub(r"\*{1,2}", "", line)
+    # Remove headers, bullets, blockquotes at start of line
+    line = re.sub(r"^[#>\-*\s]+", "", line)
+    # Collapse whitespace
+    line = re.sub(r"\s+", " ", line).strip()
+    return line
+
+
+def _get_speakable_lines(text: str) -> list[str]:
+    """Get non-empty, cleaned lines that are worth speaking."""
+    # Remove code blocks first (they span multiple lines)
+    text = re.sub(r"```[\s\S]*?```", "", text)
+    # Split, clean each line, keep meaningful ones
+    result = []
+    for line in text.splitlines():
+        cleaned = _clean_line(line)
+        if len(cleaned) > 5:
+            result.append(cleaned)
+    return result
+
+
+def _first_sentence(text: str) -> str:
+    """Extract the first sentence from text."""
+    # Match up to the first sentence-ending punctuation
+    m = re.match(r"(.+?[.!?])\s", text + " ")
+    if m and len(m.group(1)) < 150:
+        return m.group(1)
+    return text[:150]
+
+
 def _extract_summary(transcript_path: str) -> str:
-    """Read the last assistant text message from the transcript JSONL."""
+    """Build a summary from the last assistant message in the transcript.
+
+    Strategy: take the first meaningful sentence (what was done) and the
+    last meaningful sentence (what the user needs to do), if different.
+    """
     try:
         last_text = ""
         with open(transcript_path, encoding="utf-8") as f:
@@ -92,7 +136,6 @@ def _extract_summary(transcript_path: str) -> str:
                 if not line:
                     continue
                 entry = json.loads(line)
-                # Look for assistant messages with text content
                 if entry.get("type") == "assistant":
                     message = entry.get("message", {})
                     for block in message.get("content", []):
@@ -100,14 +143,21 @@ def _extract_summary(transcript_path: str) -> str:
                             last_text = block["text"]
         if not last_text:
             return ""
-        # Get the last non-empty line — that's where the ask/conclusion lives
-        lines = [l.strip() for l in last_text.strip().splitlines() if l.strip()]
-        snippet = lines[-1] if lines else last_text.strip()
-        # Trim to first sentence if still long
-        period = snippet.find(".")
-        if 0 < period < 150:
-            return snippet[: period + 1]
-        return snippet[:150]
+
+        lines = _get_speakable_lines(last_text)
+        if not lines:
+            return ""
+
+        first = _first_sentence(lines[0])
+        last = _first_sentence(lines[-1])
+
+        # If first and last are the same (short response), just use one
+        if first == last or len(lines) == 1:
+            return first
+
+        # Combine: what was done + what's needed from the user
+        return f"{first} {last}"
+
     except (OSError, json.JSONDecodeError, KeyError):
         pass
     return ""
