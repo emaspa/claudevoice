@@ -313,22 +313,54 @@ def resolve_message(
 # --- TTS ---
 
 
-async def _generate_and_play(text: str, config: dict) -> None:
-    import edge_tts
+def _speak_elevenlabs(text: str, config: dict) -> None:
+    from elevenlabs import save
+    from elevenlabs.client import ElevenLabs
+
+    el_config = config.get("elevenlabs", {})
+    api_key = el_config.get("api_key") or os.environ.get("ELEVENLABS_API_KEY", "")
+    client = ElevenLabs(api_key=api_key)
 
     tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
     tmp_path = tmp.name
     tmp.close()
 
     try:
-        comm = edge_tts.Communicate(
-            text,
-            voice=config.get("voice", "en-US-GuyNeural"),
-            rate=config.get("rate", "+0%"),
-            volume=config.get("volume", "+0%"),
-            pitch=config.get("pitch", "+0Hz"),
+        audio = client.text_to_speech.convert(
+            text=text,
+            voice_id=el_config.get("voice_id", "JBFqnCBsd6RMkjVDRZzb"),
+            model_id=el_config.get("model_id", "eleven_multilingual_v2"),
+            output_format=el_config.get("output_format", "mp3_44100_128"),
         )
-        await comm.save(tmp_path)
+        save(audio, tmp_path)
+        play_mp3(tmp_path)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+async def _generate_edge_tts(text: str, config: dict, tmp_path: str) -> None:
+    import edge_tts
+
+    comm = edge_tts.Communicate(
+        text,
+        voice=config.get("voice", "en-US-GuyNeural"),
+        rate=config.get("rate", "+0%"),
+        volume=config.get("volume", "+0%"),
+        pitch=config.get("pitch", "+0Hz"),
+    )
+    await comm.save(tmp_path)
+
+
+def _speak_edge_tts(text: str, config: dict) -> None:
+    tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+    tmp_path = tmp.name
+    tmp.close()
+
+    try:
+        asyncio.run(_generate_edge_tts(text, config, tmp_path))
         play_mp3(tmp_path)
     finally:
         try:
@@ -338,7 +370,11 @@ async def _generate_and_play(text: str, config: dict) -> None:
 
 
 def speak(text: str, config: dict) -> None:
-    asyncio.run(_generate_and_play(text, config))
+    tts_engine = config.get("tts_engine", "edge-tts")
+    if tts_engine == "elevenlabs":
+        _speak_elevenlabs(text, config)
+    else:
+        _speak_edge_tts(text, config)
 
 
 # --- Entry point ---

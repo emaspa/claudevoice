@@ -2,7 +2,7 @@
 
 Voice notifications for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Speaks aloud when Claude starts working, finishes a task, or needs your input — so you can step away from the screen and still know what's happening.
 
-Uses [edge-tts](https://pypi.org/project/edge-tts/) (Microsoft neural voices, free, no API key) and Windows MCI for playback.
+Supports two TTS engines: [edge-tts](https://pypi.org/project/edge-tts/) (Microsoft neural voices, free, no API key) and [ElevenLabs](https://elevenlabs.io/) (premium quality, requires API key). Uses Windows MCI for playback.
 
 ## How it works
 
@@ -32,11 +32,13 @@ This is used by Claude during a session to narrate important actions — see `CL
 
 ## Setup
 
-### 1. Install the dependency
+### 1. Install dependencies
 
 ```bash
-pip install edge-tts
+pip install edge-tts elevenlabs
 ```
+
+Only `edge-tts` is required. Install `elevenlabs` if you want to use their premium voices.
 
 ### 2. Clone the repo
 
@@ -126,10 +128,17 @@ Edit `config.json` to customize voice settings and fallback messages:
 ```json
 {
     "enabled": true,
+    "tts_engine": "edge-tts",
     "voice": "en-US-AndrewNeural",
     "rate": "+0%",
     "volume": "+0%",
     "pitch": "+0Hz",
+    "elevenlabs": {
+        "api_key": "",
+        "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+        "model_id": "eleven_multilingual_v2",
+        "output_format": "mp3_44100_128"
+    },
     "debug": false,
     "messages": {
         "prompt_submit": "{prompt}",
@@ -142,17 +151,30 @@ Edit `config.json` to customize voice settings and fallback messages:
 }
 ```
 
+### General
+- **tts_engine** — `"edge-tts"` (default, free) or `"elevenlabs"` (premium quality)
+- **enabled** — set to `false` to silence everything without removing the hooks
+- **debug** — set to `true` to log raw hook event JSON to `debug.log`
+- **messages** — fallback templates when personality.md is missing or a section is empty. `{prompt}`, `{summary}`, and `{message}` are replaced with actual content.
+
+### edge-tts settings
 - **voice** — any [edge-tts voice](https://gist.github.com/BettyJJ/17cbaa1de96235a7f5773b8571a4f422). Try `en-US-AriaNeural`, `en-GB-RyanNeural`, etc.
 - **rate / volume / pitch** — adjust speech speed, loudness, and tone (e.g. `"+20%"`, `"-10%"`, `"+2Hz"`)
-- **messages** — fallback templates when personality.md is missing or a section is empty. `{prompt}`, `{summary}`, and `{message}` are replaced with actual content. `prompt_submit_fallback` is used when the cleaned prompt is empty.
-- **debug** — set to `true` to log raw hook event JSON to `debug.log`
-- **enabled** — set to `false` to silence everything without removing the hooks
+
+### ElevenLabs settings
+To enable ElevenLabs, set `"tts_engine": "elevenlabs"` and provide your API key:
+
+- **elevenlabs.api_key** — your ElevenLabs API key (or set the `ELEVENLABS_API_KEY` environment variable)
+- **elevenlabs.voice_id** — voice to use. Browse voices at [elevenlabs.io/voices](https://elevenlabs.io/app/voice-library) or use the API to list them
+- **elevenlabs.model_id** — TTS model. Options: `eleven_multilingual_v2` (default, best quality), `eleven_flash_v2_5` (lower latency, cheaper), `eleven_v3` (latest)
+- **elevenlabs.output_format** — audio format. Default `mp3_44100_128` (best quality). Use `mp3_22050_64` for smaller files
 
 ## Requirements
 
 - Windows 11 (uses MCI via `winmm.dll` for audio playback)
 - Python 3.10+
-- Internet connection (edge-tts calls Microsoft's TTS service)
+- Internet connection (both TTS engines call external services)
+- ElevenLabs API key (only if using ElevenLabs engine)
 
 ## License
 
