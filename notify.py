@@ -16,8 +16,6 @@ from ctypes import create_unicode_buffer, windll, wintypes
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
-MAX_MESSAGE_LENGTH = 250
-MAX_PROMPT_LENGTH = 100
 
 # --- MCI audio playback (Windows) ---
 
@@ -116,15 +114,23 @@ def _pick_template(personality: dict[str, list[str]], key: str) -> str | None:
 # --- Message resolution ---
 
 
-def _truncate(text: str, max_len: int = MAX_MESSAGE_LENGTH) -> str:
-    if len(text) <= max_len:
-        return text
-    # Cut at last sentence boundary within limit, or just truncate
-    cut = text[:max_len]
-    last_period = cut.rfind(".")
-    if last_period > max_len // 2:
-        return cut[: last_period + 1]
-    return cut.rstrip() + "."
+def _split_sentences(text: str) -> list[str]:
+    """Split text into complete sentences."""
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    return [s.strip() for s in parts if s.strip()]
+
+
+def _take_sentences(text: str, max_sentences: int = 3) -> str:
+    """Keep up to max_sentences complete sentences from text.
+
+    Avoids cutting mid-thought. If the text has no sentence boundaries,
+    returns it as-is (better to say a full thought than chop it).
+    """
+    sentences = _split_sentences(text)
+    if not sentences:
+        return text.strip()
+    kept = sentences[:max_sentences]
+    return " ".join(kept)
 
 
 def _strip_paths(text: str) -> str:
@@ -173,23 +179,23 @@ def _get_speakable_lines(text: str) -> list[str]:
 
 
 def _first_sentence(text: str) -> str:
-    """Extract the first sentence from text."""
-    # Match up to the first sentence-ending punctuation
-    m = re.match(r"(.+?[.!?])\s", text + " ")
-    if m and len(m.group(1)) < 150:
-        return m.group(1)
-    return text[:150]
+    """Extract the first complete sentence from text."""
+    sentences = _split_sentences(text)
+    if sentences:
+        return sentences[0]
+    return text.strip()
 
 
 def _clean_prompt(prompt: str) -> str:
-    """Extract the speakable intent from a user prompt."""
+    """Extract the speakable intent from a user prompt.
+
+    Takes the first meaningful sentence — enough to capture what was asked
+    without reading back the entire prompt verbatim.
+    """
     lines = _get_speakable_lines(prompt)
     if not lines:
         return ""
-    text = _first_sentence(lines[0])
-    if len(text) > MAX_PROMPT_LENGTH:
-        text = _truncate(text, MAX_PROMPT_LENGTH)
-    return text
+    return _first_sentence(lines[0])
 
 
 def _extract_summary(transcript_path: str) -> str:
@@ -218,15 +224,9 @@ def _extract_summary(transcript_path: str) -> str:
         if not lines:
             return ""
 
-        first = _first_sentence(lines[0])
-        last = _first_sentence(lines[-1])
-
-        # If first and last are the same (short response), just use one
-        if first == last or len(lines) == 1:
-            return first
-
-        # Combine: what was done + what's needed from the user
-        return f"{first} {last}"
+        # Gather all speakable text, take the most meaningful sentences
+        full_text = " ".join(lines)
+        return _take_sentences(full_text, max_sentences=2)
 
     except (OSError, json.JSONDecodeError, KeyError):
         pass
@@ -253,13 +253,13 @@ def resolve_message(
                 if no_placeholder:
                     return random.choice(no_placeholder)
                 return messages.get("prompt_submit", "On it.")
-            return _truncate(template.replace("{prompt}", prompt))
+            return _take_sentences(template.replace("{prompt}", prompt))
         # No personality — use config template
         fallback = messages.get("prompt_submit", "{prompt}")
         if "{prompt}" in fallback:
             if not prompt:
                 return messages.get("prompt_submit_fallback", "On it.")
-            return _truncate(fallback.replace("{prompt}", prompt))
+            return _take_sentences(fallback.replace("{prompt}", prompt))
         return fallback
 
     if hook_event == "Stop":
@@ -277,7 +277,7 @@ def resolve_message(
                 text = template.replace("{summary}", "").strip()
             else:
                 text = template.replace("{summary}", summary)
-            return _truncate(text)
+            return _take_sentences(text)
         # No personality — use config template
         template = messages.get("stop", "{summary}")
         if not summary:
@@ -288,7 +288,7 @@ def resolve_message(
                 text = summary
             else:
                 text = template.replace("{summary}", summary)
-        return _truncate(text)
+        return _take_sentences(text)
 
     if hook_event == "Notification":
         notif_type = event.get("notification_type", "")
@@ -300,12 +300,12 @@ def resolve_message(
         if template:
             raw_message = event.get("message", "")
             text = template.replace("{message}", raw_message)
-            return _truncate(text)
+            return _take_sentences(text)
         # Fall back to config
         template = messages.get(key, messages.get("notification_default", "{message}"))
         raw_message = event.get("message", "Notification")
         text = template.replace("{message}", raw_message)
-        return _truncate(text)
+        return _take_sentences(text)
 
     return None
 

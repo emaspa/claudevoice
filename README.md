@@ -95,6 +95,14 @@ Add this to your `~/.claude/settings.json` (adjust the path to where you cloned 
 
 That's it. Start a new Claude Code session and you'll hear it.
 
+### 4. Create your config
+
+```bash
+cp config.example.json config.json
+```
+
+Edit `config.json` with your preferences. This file is gitignored so your API keys stay local.
+
 ## Personality
 
 Edit `personality.md` to change what the voice says and how it says it. The file has sections for each event type, with multiple template phrases the system picks from randomly:
