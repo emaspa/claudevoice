@@ -372,9 +372,12 @@ def _speak_edge_tts(text: str, config: dict) -> None:
 def speak(text: str, config: dict) -> None:
     tts_engine = config.get("tts_engine", "edge-tts")
     if tts_engine == "elevenlabs":
-        _speak_elevenlabs(text, config)
-    else:
-        _speak_edge_tts(text, config)
+        try:
+            _speak_elevenlabs(text, config)
+            return
+        except Exception as e:
+            print(f"ElevenLabs failed, falling back to edge-tts: {e}", file=sys.stderr)
+    _speak_edge_tts(text, config)
 
 
 # --- Entry point ---
